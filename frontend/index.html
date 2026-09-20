@@ -42,9 +42,19 @@
             <div id="uploadStatus"></div>
         </div>
 
-        <!-- 文件列表 -->
+        <!-- 文件目录 -->
         <div class="file-list-section">
-            <h2>文件库</h2>
+            <div class="directory-header">
+                <h2>文件目录</h2>
+                <div class="directory-toolbar">
+                    <input type="search" id="fileSearch" class="directory-search"
+                           placeholder="按文件名筛选…" autocomplete="off">
+                    <button type="button" id="refreshBtn" class="refresh-btn" title="刷新目录">
+                        <span class="refresh-icon">⟳</span> 刷新
+                    </button>
+                </div>
+            </div>
+            <div id="directoryMeta" class="directory-meta"></div>
             <div id="fileList" class="file-list"></div>
         </div>
 
@@ -77,6 +87,19 @@
                     </div>
                     <div id="authError" class="error-msg"></div>
                 </form>
+            </div>
+        </div>
+
+        <!-- 文件详情弹窗 -->
+        <div id="fileDetailModal" class="modal">
+            <div class="modal-content">
+                <h2>文件详情</h2>
+                <div id="fileDetailBody">
+                    <!-- 加载中 / 错误 / 详情内容均由 JS 渲染 -->
+                </div>
+                <div class="modal-buttons">
+                    <button type="button" class="btn-secondary" onclick="closeFileDetail()">关闭</button>
+                </div>
             </div>
         </div>
 

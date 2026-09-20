@@ -22,6 +22,33 @@ def allowed_file(filename):
     return ext not in BLOCKED_EXTENSIONS
 
 
+def serialize_file(row):
+    """统一的文件记录序列化出口。
+
+    列表与详情必须经过同一个映射函数，保证两端看到的同一对象字段一致；
+    服务端绝对路径 path 不下发到前端。
+    """
+    return {
+        'id': row['id'],
+        'name': row['name'],
+        'size': row['size'],
+        'uploaded_at': row['uploaded_at'],
+        'uploaded_by': row['uploaded_by'],
+        'deleted': bool(row['deleted']),
+        'deleted_at': row['deleted_at'],
+        'delete_reason': row['delete_reason'],
+    }
+
+
+def safe_remove_disk_file(path):
+    """尽力删除磁盘文件，失败仅记录日志（数据库状态仍是权威来源）。"""
+    try:
+        if path and os.path.exists(path):
+            os.remove(path)
+    except OSError as exc:
+        logger.warning(f'删除磁盘文件失败: {path}, {exc}')
+
+
 @files_bp.route('/api/upload', methods=['POST'])
 def upload_file():
     if 'file' not in request.files:
@@ -55,49 +82,146 @@ def upload_file():
 
     file_size = os.path.getsize(filepath)
 
+    # 上传者可能携带 token（可选），用于目录展示
+    username = None
+    auth_header = request.headers.get('Authorization', '')
+    if auth_header.startswith('Bearer '):
+        username = get_username_from_token(auth_header[7:])
+
     conn = get_db()
     cursor = conn.cursor()
     cursor.execute(
-        'INSERT INTO files (id, name, path, size) VALUES (?, ?, ?, ?)',
-        (file_id, original_name, filepath, file_size)
+        'INSERT INTO files (id, name, path, size, uploaded_by) VALUES (?, ?, ?, ?, ?)',
+        (file_id, original_name, filepath, file_size, username)
     )
     conn.commit()
+    cursor.execute(
+        'SELECT id, name, size, uploaded_at, uploaded_by, deleted, deleted_at, delete_reason '
+        'FROM files WHERE id = ?',
+        (file_id,)
+    )
+    record = serialize_file(cursor.fetchone())
     conn.close()
 
     logger.info(f"文件上传成功: {original_name} (ID: {file_id}, 大小: {file_size} bytes)")
-    return jsonify({'success': True, 'file_id': file_id, 'filename': original_name})
+    # 返回完整记录，前端可直接并入目录，不依赖旧列表缓存
+    return jsonify({'success': True, 'file': record, 'file_id': file_id, 'filename': original_name})
 
 
 @files_bp.route('/api/files', methods=['GET'])
 def list_files():
+    """文件目录：返回全部记录（含已删除条目，保留行与删除原因）。
+
+    排序固定：未删除在前、已删除在后，各自按上传时间倒序、id 兜底，
+    保证连续刷新顺序稳定，同一条记录只出现一次（主键唯一 + 单层映射）。
+    """
     conn = get_db()
     cursor = conn.cursor()
-    cursor.execute('SELECT id, name, path, size FROM files')
-    files = [dict(row) for row in cursor.fetchall()]
+    cursor.execute('''
+        SELECT id, name, size, uploaded_at, uploaded_by, deleted, deleted_at, delete_reason
+        FROM files
+        ORDER BY deleted ASC,
+                 datetime(uploaded_at) DESC,
+                 id ASC
+    ''')
+    files = [serialize_file(row) for row in cursor.fetchall()]
     conn.close()
     return jsonify(files)
+
+
+@files_bp.route('/api/files/<file_id>', methods=['GET'])
+def get_file(file_id):
+    """文件详情：列表与详情通过同一稳定 ID 拿到同一对象。"""
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute(
+        'SELECT id, name, size, uploaded_at, uploaded_by, deleted, deleted_at, delete_reason '
+        'FROM files WHERE id = ?',
+        (file_id,)
+    )
+    row = cursor.fetchone()
+    conn.close()
+
+    if not row:
+        return jsonify({'error': '文件不存在或已从目录中移除'}), 404
+
+    return jsonify(serialize_file(row))
+
+
+@files_bp.route('/api/files/<file_id>', methods=['DELETE'])
+@login_required
+def delete_file(file_id):
+    """软删除：保留原行，写入删除原因与删除时间。
+
+    - 不存在的记录：404
+    - 已删除的记录：409 冲突，并回传原删除原因（重复删除不覆盖、不丢原因）
+    """
+    data = request.get_json(silent=True) or {}
+    reason = (data.get('reason') or '').strip() or '用户未填写删除原因'
+    if len(reason) > 200:
+        reason = reason[:200]
+
+    token = get_token_from_request()
+    username = get_username_from_token(token)
+
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute('SELECT path, deleted, delete_reason FROM files WHERE id = ?', (file_id,))
+    row = cursor.fetchone()
+
+    if not row:
+        conn.close()
+        return jsonify({'error': '文件不存在或已从目录中移除'}), 404
+
+    if row['deleted']:
+        conn.close()
+        return jsonify({
+            'error': '该文件已删除',
+            'delete_reason': row['delete_reason']
+        }), 409
+
+    deleted_at = time.time()
+    cursor.execute(
+        'UPDATE files SET deleted = 1, deleted_at = ?, delete_reason = ? WHERE id = ?',
+        (deleted_at, reason, file_id)
+    )
+    conn.commit()
+    cursor.execute(
+        'SELECT id, name, size, uploaded_at, uploaded_by, deleted, deleted_at, delete_reason '
+        'FROM files WHERE id = ?',
+        (file_id,)
+    )
+    record = serialize_file(cursor.fetchone())
+    conn.close()
+
+    # 数据库落库后再移除磁盘文件；失败不影响删除结果
+    safe_remove_disk_file(row['path'])
+
+    logger.info(f"文件软删除: ID {file_id}, 操作者 {username}, 原因: {reason}")
+    return jsonify({'success': True, 'message': '文件已删除', 'file': record})
 
 
 @files_bp.route('/api/download/<file_id>', methods=['GET'])
 def download_file(file_id):
     # 优先从 Authorization 头获取 token，兼容查询参数（已废弃）
-    auth_header = request.headers.get('Authorization', '')
-    if auth_header.startswith('Bearer '):
-        token = auth_header[7:]
-    else:
-        token = request.args.get('token')  # 向后兼容，建议前端迁移到 Authorization 头
+    token = get_token_from_request()
 
     if not token or not verify_token(token):
         return jsonify({'error': '未授权或token已过期'}), 401
 
     conn = get_db()
     cursor = conn.cursor()
-    cursor.execute('SELECT name, path FROM files WHERE id = ?', (file_id,))
+    cursor.execute('SELECT name, path, deleted, delete_reason FROM files WHERE id = ?', (file_id,))
     file_info = cursor.fetchone()
     conn.close()
 
     if not file_info:
         return jsonify({'error': '文件不存在'}), 404
+
+    if file_info['deleted']:
+        return jsonify({
+            'error': f"文件已删除，无法下载（删除原因：{file_info['delete_reason'] or '未记录'}）"
+        }), 410
 
     if not os.path.abspath(file_info['path']).startswith(os.path.abspath(UPLOAD_FOLDER)):
         return jsonify({'error': '非法文件路径'}), 403
@@ -120,7 +244,7 @@ def get_share_link_info(share_id):
     cursor = conn.cursor()
     cursor.execute('''
         SELECT s.id, s.file_id, s.created_by, s.expires_at, s.max_downloads, s.download_count, s.created_at,
-               f.name as filename, f.size as filesize
+               f.name as filename, f.size as filesize, f.deleted as file_deleted
         FROM share_links s
         JOIN files f ON s.file_id = f.id
         WHERE s.id = ?
@@ -134,6 +258,9 @@ def is_share_valid(share):
     """检查分享链接是否有效"""
     if not share:
         return False, '分享链接不存在'
+
+    if share['file_deleted']:
+        return False, '分享的文件已被删除'
 
     if share['expires_at'] is not None and share['expires_at'] < time.time():
         return False, '分享链接已过期'
@@ -181,12 +308,18 @@ def create_share():
 
     conn = get_db()
     cursor = conn.cursor()
-    cursor.execute('SELECT id, name FROM files WHERE id = ?', (file_id,))
+    cursor.execute('SELECT id, name, deleted, delete_reason FROM files WHERE id = ?', (file_id,))
     file_info = cursor.fetchone()
 
     if not file_info:
         conn.close()
         return jsonify({'error': '文件不存在'}), 404
+
+    if file_info['deleted']:
+        conn.close()
+        return jsonify({
+            'error': f"文件已删除，无法分享（删除原因：{file_info['delete_reason'] or '未记录'}）"
+        }), 410
 
     if expire_hours is None:
         expire_hours = SHARE_LINK_EXPIRE_HOURS
@@ -295,7 +428,7 @@ def list_shares():
     cursor = conn.cursor()
     cursor.execute('''
         SELECT s.id, s.file_id, s.created_by, s.expires_at, s.max_downloads, s.download_count, s.created_at,
-               f.name as filename, f.size as filesize
+               f.name as filename, f.size as filesize, f.deleted as file_deleted
         FROM share_links s
         JOIN files f ON s.file_id = f.id
         WHERE s.created_by = ?

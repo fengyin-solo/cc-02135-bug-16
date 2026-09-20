@@ -195,6 +195,229 @@ h2 {
     color: var(--success);
 }
 
+/* 文件目录工具栏 */
+.directory-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 16px;
+    margin-bottom: 16px;
+    flex-wrap: wrap;
+}
+
+.directory-header h2 {
+    margin-bottom: 0;
+}
+
+.directory-toolbar {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+}
+
+.directory-search {
+    padding: 10px 16px;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    font-size: 0.875rem;
+    color: var(--text-primary);
+    min-width: 220px;
+    transition: all 0.3s ease;
+}
+
+.directory-search::placeholder {
+    color: var(--text-secondary);
+}
+
+.directory-search:focus {
+    outline: none;
+    border-color: var(--accent);
+    background: rgba(59, 130, 246, 0.05);
+}
+
+.refresh-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: transparent;
+    color: var(--text-primary);
+    border: 1px solid var(--border);
+    padding: 10px 16px;
+    border-radius: 10px;
+    cursor: pointer;
+    font-size: 0.875rem;
+    font-weight: 500;
+    transition: all 0.3s ease;
+    white-space: nowrap;
+}
+
+.refresh-btn:hover:not(:disabled) {
+    background: rgba(59, 130, 246, 0.15);
+    border-color: var(--accent);
+}
+
+.refresh-btn:disabled {
+    opacity: 0.6;
+    cursor: default;
+}
+
+.refresh-icon {
+    display: inline-block;
+    font-size: 1rem;
+    line-height: 1;
+}
+
+.refresh-btn.spinning .refresh-icon {
+    animation: spin 0.8s linear infinite;
+}
+
+.directory-meta {
+    font-size: 0.8125rem;
+    color: var(--text-secondary);
+    margin-bottom: 16px;
+}
+
+.directory-message {
+    text-align: center;
+    padding: 40px 24px;
+    border-radius: 16px;
+    font-size: 0.9375rem;
+    border: 1px dashed var(--border);
+}
+
+.directory-message-loading {
+    color: var(--text-secondary);
+}
+
+.directory-message-empty {
+    color: var(--text-secondary);
+}
+
+.directory-message-no-result {
+    color: #fbbf24;
+    border-color: rgba(251, 191, 36, 0.35);
+    background: rgba(251, 191, 36, 0.06);
+}
+
+.directory-message-error {
+    color: var(--error);
+    border-color: rgba(239, 68, 68, 0.35);
+    background: rgba(239, 68, 68, 0.06);
+}
+
+/* 已删除条目：保留原行，但弱化展示并标注原因 */
+.file-item-deleted {
+    opacity: 0.55;
+}
+
+.file-item-deleted:hover {
+    transform: none;
+}
+
+.file-item-deleted .file-name {
+    text-decoration: line-through;
+}
+
+.file-delete-reason {
+    font-size: 0.75rem;
+    color: #fca5a5;
+    margin-top: 2px;
+}
+
+.detail-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    background: transparent;
+    color: var(--text-primary);
+    border: 1px solid var(--border);
+    padding: 12px 20px;
+    border-radius: 10px;
+    cursor: pointer;
+    font-size: 0.875rem;
+    font-weight: 500;
+    transition: all 0.3s ease;
+}
+
+.detail-btn:hover {
+    background: rgba(59, 130, 246, 0.15);
+    border-color: var(--accent);
+}
+
+/* 文件详情弹窗 */
+.detail-loading,
+.detail-error {
+    text-align: center;
+    color: var(--text-secondary);
+    padding: 24px 0;
+}
+
+.detail-error {
+    color: var(--error);
+}
+
+.detail-id-banner {
+    font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
+    font-size: 0.6875rem;
+    color: var(--text-secondary);
+    text-align: center;
+    word-break: break-all;
+    margin-bottom: 16px !important;
+}
+
+.detail-icon {
+    text-align: center;
+    font-size: 2.5rem;
+    margin-bottom: 16px;
+}
+
+.detail-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 16px;
+    padding: 10px 0;
+    border-bottom: 1px solid var(--border);
+    font-size: 0.875rem;
+}
+
+.detail-label {
+    color: var(--text-secondary);
+    flex-shrink: 0;
+}
+
+.detail-value {
+    font-weight: 500;
+    text-align: right;
+    word-break: break-all;
+}
+
+.detail-value.status-active {
+    color: var(--success);
+}
+
+.detail-value.status-deleted {
+    color: var(--error);
+}
+
+.detail-actions {
+    display: flex;
+    gap: 12px;
+    margin-top: 24px;
+}
+
+.btn-danger {
+    border-color: rgba(239, 68, 68, 0.4);
+    color: #fca5a5;
+}
+
+.btn-danger:hover {
+    background: rgba(239, 68, 68, 0.15);
+    border-color: var(--error);
+    color: var(--error);
+}
+
 /* 文件列表区域 */
 .file-list-section {
     background: var(--glass);

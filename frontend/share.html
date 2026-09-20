@@ -83,15 +83,9 @@
             document.getElementById('loadingOverlay').classList.remove('active');
         }
 
-        // HTML转义防止XSS
-        function escapeHtml(text) {
-            const div = document.createElement('div');
-            div.textContent = text;
-            return div.innerHTML;
-        }
-
         // 获取文件图标
         function getFileIcon(filename) {
+            if (!filename || !filename.includes('.')) return '📁';
             const ext = filename.split('.').pop().toLowerCase();
             const icons = {
                 pdf: '📄', doc: '📝', docx: '📝', txt: '📃',
@@ -103,13 +97,15 @@
             return icons[ext] || '📁';
         }
 
-        // 格式化文件大小
+        // 格式化文件大小（与文件目录同一口径，非法值安全降级）
         function formatSize(bytes) {
-            if (bytes === 0) return '0 B';
+            const n = Number(bytes);
+            if (!Number.isFinite(n) || n < 0) return '未知大小';
+            if (n === 0) return '0 B';
             const k = 1024;
             const sizes = ['B', 'KB', 'MB', 'GB'];
-            const i = Math.floor(Math.log(bytes) / Math.log(k));
-            return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+            const i = Math.min(Math.floor(Math.log(n) / Math.log(k)), sizes.length - 1);
+            return parseFloat((n / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
         }
 
         // 格式化时间戳
@@ -169,9 +165,9 @@
             document.getElementById('shareContent').style.display = 'block';
 
             document.getElementById('fileIcon').textContent = getFileIcon(info.filename);
-            document.getElementById('fileName').textContent = escapeHtml(info.filename);
+            document.getElementById('fileName').textContent = info.filename;
             document.getElementById('fileSize').textContent = formatSize(info.filesize);
-            document.getElementById('sharedBy').textContent = escapeHtml(info.created_by);
+            document.getElementById('sharedBy').textContent = info.created_by;
             document.getElementById('expireTime').textContent = formatTimestamp(info.expires_at);
             document.getElementById('downloadCount').textContent = 
                 info.max_downloads ? `${info.download_count} / ${info.max_downloads} 次` : `${info.download_count} 次（无限制）`;

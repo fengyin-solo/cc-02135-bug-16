@@ -31,9 +31,27 @@ def init_db():
             name TEXT NOT NULL,
             path TEXT NOT NULL,
             size INTEGER NOT NULL,
-            uploaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            uploaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            uploaded_by TEXT,
+            deleted INTEGER NOT NULL DEFAULT 0,
+            deleted_at REAL,
+            delete_reason TEXT
         )
     ''')
+
+    # 兼容旧库：补齐软删除相关列（已存在则跳过）
+    existing_cols = {
+        row['name'] for row in cursor.execute('PRAGMA table_info(files)').fetchall()
+    }
+    migration_columns = [
+        ('uploaded_by', 'ALTER TABLE files ADD COLUMN uploaded_by TEXT'),
+        ('deleted', 'ALTER TABLE files ADD COLUMN deleted INTEGER NOT NULL DEFAULT 0'),
+        ('deleted_at', 'ALTER TABLE files ADD COLUMN deleted_at REAL'),
+        ('delete_reason', 'ALTER TABLE files ADD COLUMN delete_reason TEXT'),
+    ]
+    for col, ddl in migration_columns:
+        if col not in existing_cols:
+            cursor.execute(ddl)
 
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS tokens (
