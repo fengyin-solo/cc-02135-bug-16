@@ -45,6 +45,10 @@
         <!-- 文件列表 -->
         <div class="file-list-section">
             <h2>文件库</h2>
+            <div class="list-toolbar">
+                <input type="search" id="fileSearch" class="list-search" placeholder="按文件名筛选…" autocomplete="off">
+                <button type="button" id="refreshFilesBtn" class="refresh-btn" title="刷新文件列表">↻ 刷新</button>
+            </div>
             <div id="fileList" class="file-list"></div>
         </div>
 
@@ -77,6 +81,47 @@
                     </div>
                     <div id="authError" class="error-msg"></div>
                 </form>
+            </div>
+        </div>
+
+        <!-- 文件详情弹窗 -->
+        <div id="fileDetailModal" class="modal">
+            <div class="modal-content">
+                <h2>文件详情</h2>
+                <div id="fileDetailLoading" class="detail-loading">
+                    <div class="spinner" style="margin: 20px auto;"></div>
+                    <p>正在加载详情…</p>
+                </div>
+                <div id="fileDetailBody" class="detail-body" style="display: none;">
+                    <div class="detail-icon" id="detailIcon">📁</div>
+                    <div class="info-item">
+                        <span class="info-label">文件名称</span>
+                        <span id="detailName" class="info-value"></span>
+                    </div>
+                    <div class="info-item">
+                        <span class="info-label">文件大小</span>
+                        <span id="detailSize" class="info-value"></span>
+                    </div>
+                    <div class="info-item">
+                        <span class="info-label">上传时间</span>
+                        <span id="detailUploadedAt" class="info-value"></span>
+                    </div>
+                    <div class="info-item">
+                        <span class="info-label">文件ID</span>
+                        <span id="detailId" class="info-value detail-id"></span>
+                    </div>
+                    <div id="detailDeletedNote" class="detail-deleted-note" style="display: none;"></div>
+                    <div class="modal-buttons" id="detailActions">
+                        <button type="button" class="btn-secondary" onclick="closeFileDetail()">关闭</button>
+                    </div>
+                </div>
+                <div id="fileDetailError" class="detail-error" style="display: none;">
+                    <div style="font-size: 40px; margin-bottom: 8px;">⚠️</div>
+                    <p id="detailErrorMessage"></p>
+                    <div class="modal-buttons">
+                        <button type="button" class="btn-secondary" onclick="closeFileDetail()">关闭</button>
+                    </div>
+                </div>
             </div>
         </div>
 

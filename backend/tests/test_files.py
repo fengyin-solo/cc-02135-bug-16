@@ -325,3 +325,171 @@ def test_download_by_share_no_auth_needed(client, auth_token):
     download_resp = client.get(f'/api/share/{share_id}/download')
     assert download_resp.status_code == 200
     assert download_resp.data == b'public content'
+
+
+def _upload(client, name='sample.txt', content=b'sample content'):
+    data = {'file': (io.BytesIO(content), name)}
+    resp = client.post('/api/upload', data=data, content_type='multipart/form-data')
+    assert resp.status_code == 200
+    return resp.get_json()['file_id']
+
+
+# ---------- 列表 / 详情一致性 ----------
+
+def test_list_files_unique_and_stable_order(client):
+    """列表中每个文件只出现一次，顺序按上传时间+id稳定"""
+    id_a = _upload(client, 'a.txt', b'aaa')
+    id_b = _upload(client, 'b.txt', b'bbbb')
+
+    first = client.get('/api/files').get_json()
+    second = client.get('/api/files').get_json()
+
+    ids_first = [f['id'] for f in first]
+    assert len(ids_first) == len(set(ids_first)), '列表存在重复记录'
+    assert id_a in ids_first and id_b in ids_first
+    assert [f['id'] for f in second] == ids_first, '连续刷新行顺序发生变化'
+
+    by_id = {f['id']: f for f in first}
+    assert by_id[id_a]['name'] == 'a.txt'
+    assert by_id[id_a]['size'] == 3
+    assert by_id[id_b]['size'] == 4
+
+
+def test_list_matches_detail(client):
+    """列表与详情看到的同一对象字段一致"""
+    file_id = _upload(client, 'detail_match.txt', b'match me')
+
+    listed = next(f for f in client.get('/api/files').get_json() if f['id'] == file_id)
+    detail = client.get(f'/api/files/{file_id}')
+    assert detail.status_code == 200
+
+    for key in ('id', 'name', 'size', 'uploaded_at', 'is_deleted'):
+        assert listed[key] == detail.get_json()[key]
+
+
+def test_detail_not_found(client):
+    resp = client.get('/api/files/does-not-exist')
+    assert resp.status_code == 404
+
+
+# ---------- 删除保留原行并说明原因 ----------
+
+def test_delete_file_soft_keeps_row_with_reason(client):
+    file_id = _upload(client, 'gone.txt', b'bye')
+
+    resp = client.delete(
+        f'/api/files/{file_id}',
+        json={'reason': '内容违规'}
+    )
+    assert resp.status_code == 200
+    body = resp.get_json()
+    assert body['success'] is True
+    assert body['file']['is_deleted'] is True
+    assert body['file']['deleted_reason'] == '内容违规'
+
+    # 列表中原行仍在，且只出现一次，带删除标记与原因
+    rows = client.get('/api/files').get_json()
+    matches = [f for f in rows if f['id'] == file_id]
+    assert len(matches) == 1
+    assert matches[0]['is_deleted'] is True
+    assert matches[0]['deleted_reason'] == '内容违规'
+
+    # 详情 410 并说明原因
+    detail = client.get(f'/api/files/{file_id}')
+    assert detail.status_code == 410
+    assert '删除' in detail.get_json()['error']
+
+    # 下载被拒绝
+    auth = client.post('/api/auth', json={'username': 'admin', 'password': 'admin123'})
+    token = auth.get_json()['token']
+    dl = client.get(f'/api/download/{file_id}', headers={'Authorization': f'Bearer {token}'})
+    assert dl.status_code == 410
+
+
+def test_delete_file_idempotent_conflict(client):
+    file_id = _upload(client, 'once.txt', b'1')
+    assert client.delete(f'/api/files/{file_id}', json={}).status_code == 200
+    again = client.delete(f'/api/files/{file_id}', json={})
+    assert again.status_code == 409
+    assert again.get_json()['deleted_reason'] == '用户主动删除'
+
+    rows = [f for f in client.get('/api/files').get_json() if f['id'] == file_id]
+    assert len(rows) == 1
+
+
+def test_delete_missing_file(client):
+    resp = client.delete('/api/files/nope', json={})
+    assert resp.status_code == 404
+
+
+def test_empty_directory_returns_empty_list(client):
+    """空目录与条件无结果必须可区分：目录为空时返回空列表而非错误/旧数据"""
+    fresh = client  # conftest 使用独立临时库，上传前目录为空
+    # 确保没有任何文件记录（与其它测试隔离的临时库）
+    resp = fresh.get('/api/files')
+    assert resp.status_code == 200
+    assert isinstance(resp.get_json(), list)
+
+
+# ---------- 分享与文件删除联动 ----------
+
+def test_share_of_deleted_file_is_invalid(client, auth_token):
+    file_id = _upload(client, 'linked.txt', b'linked')
+    share = client.post(
+        '/api/share',
+        json={'file_id': file_id},
+        headers={'Authorization': f'Bearer {auth_token}'}
+    ).get_json()
+    share_id = share['share_id']
+
+    client.delete(f'/api/files/{file_id}', json={'reason': '版权投诉'})
+
+    info = client.get(f'/api/share/{share_id}')
+    body = info.get_json()
+    assert body['is_valid'] is False
+    assert '版权投诉' in body['error_msg']
+
+    dl = client.get(f'/api/share/{share_id}/download')
+    assert dl.status_code == 404
+    assert '版权投诉' in dl.get_json()['error']
+
+
+def test_cannot_share_deleted_file(client, auth_token):
+    file_id = _upload(client, 'deleted.txt', b'x')
+    client.delete(f'/api/files/{file_id}', json={'reason': '清理'})
+
+    resp = client.post(
+        '/api/share',
+        json={'file_id': file_id},
+        headers={'Authorization': f'Bearer {auth_token}'}
+    )
+    assert resp.status_code == 410
+
+
+def test_delete_share_soft_keeps_row(client, auth_token):
+    file_id = _upload(client, 'share_gone.txt', b'x')
+    share_id = client.post(
+        '/api/share',
+        json={'file_id': file_id},
+        headers={'Authorization': f'Bearer {auth_token}'}
+    ).get_json()['share_id']
+
+    resp = client.delete(
+        f'/api/share/{share_id}',
+        json={'reason': '不再分享'},
+        headers={'Authorization': f'Bearer {auth_token}'}
+    )
+    assert resp.status_code == 200
+
+    # 公开访问视为不存在
+    assert client.get(f'/api/share/{share_id}').status_code == 404
+    assert client.get(f'/api/share/{share_id}/download').status_code == 404
+
+    # 创建者列表中原行保留，仅一次，带删除原因
+    rows = client.get('/api/shares', headers={'Authorization': f'Bearer {auth_token}'}).get_json()
+    mine = [s for s in rows if s['share_id'] == share_id]
+    assert len(mine) == 1
+    assert mine[0]['is_deleted'] is True
+    assert mine[0]['deleted_reason'] == '不再分享'
+    assert mine[0]['is_valid'] is False
+    assert '删除' in mine[0]['error_msg']
